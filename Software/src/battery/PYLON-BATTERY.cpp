@@ -292,6 +292,7 @@ void PylonBattery::handle_ensemble_frame(uint32_t family, const CAN_frame& rx_fr
       //Byte1-2 Cycle Period
       extended_data.have_4250 = true;
       extended_data.basic_status = rx_frame.data.u8[0] & 0x07;
+      extended_data.basic_status_raw = rx_frame.data.u8[0];
       extended_data.fault = rx_frame.data.u8[3];
       extended_data.alarm = (rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4];
       extended_data.protection = (rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6];

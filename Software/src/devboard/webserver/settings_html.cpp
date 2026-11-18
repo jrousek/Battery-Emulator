@@ -464,6 +464,12 @@ String settings_processor(const String& var, BatteryEmulatorSettingsStore& setti
     return options_from_map(settings.getUInt("INVICNT", 0), contactor_modes);
   }
 
+  if (var == "PYLONRELAY") {
+    // Out-of-range values boot as Off (see init_stored_settings()), so show them that way.
+    uint32_t mode = settings.getUInt("PYLONRELAY", 0);
+    return options_from_map(mode > 2 ? 0 : mode, pylon_relay_modes);
+  }
+
 #ifdef HW_LILYGO2CAN
   if (var == "GPIOOPT1") {
     return options_for_enum_with_none((GPIOOPT1)settings.getUInt("GPIOOPT1", (int)GPIOOPT1::DEFAULT_OPT),
@@ -1083,11 +1089,6 @@ String raw_settings_processor(const String& var, BatteryEmulatorSettingsStore& s
 
   if (var == "PYLONADDR") {
     return String(settings.getUInt("PYLONADDR", 0));
-  }
-
-  if (var == "PYLONRELAY") {
-    uint32_t mode = settings.getUInt("PYLONRELAY", 0);
-    return options_from_map(mode > 2 ? 0 : mode, pylon_relay_modes);
   }
 
   if (var == "PYLONRLYMS") {

@@ -27,7 +27,8 @@ struct PylonExtendedData {
 
   // 0x4250+A and 0x4280+A
   bool have_4250 = false;
-  uint8_t basic_status = 0;  // Byte0 bits 0-2: 0 sleep, 1 charge, 2 discharge, 3 idle
+  uint8_t basic_status = 0;      // Byte0 bits 0-2: 0 sleep, 1 charge, 2 discharge, 3 idle, 4-7 reserved
+  uint8_t basic_status_raw = 0;  // Whole Byte0, bit3 forced charge request, bit4 balance charge request
   uint8_t fault = 0;
   uint16_t alarm = 0;
   uint16_t protection = 0;
@@ -89,8 +90,9 @@ class PylonHtmlRenderer : public BatteryHtmlRenderer {
     }
     content += "</h4>";
     if (data->have_4250) {
-      content += "<h4>BMS basic status: " + String(data->basic_status <= 3 ? basic_states[data->basic_status] : "?") +
-                 " (" + String(data->basic_status) + ")</h4>";
+      content +=
+          "<h4>BMS basic status: " + String(data->basic_status <= 3 ? basic_states[data->basic_status] : "Reserved") +
+          " (" + String(data->basic_status) + "), Byte0 0x" + hex2(data->basic_status_raw) + "</h4>";
       content += "<h4>Fault: 0x" + hex2(data->fault) + (data->fault & 0x20 ? " (RELAY_ERR)" : "") +
                  " &nbsp; Alarm: 0x" + hex2(data->alarm >> 8) + hex2(data->alarm & 0xFF) + " &nbsp; Protection: 0x" +
                  hex2(data->protection >> 8) + hex2(data->protection & 0xFF) + "</h4>";
