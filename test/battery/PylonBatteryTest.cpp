@@ -150,6 +150,8 @@ class PylonRelayTest : public ::testing::Test {
     user_selected_pylon_relay_close_delay_ms = 3000;
     datalayer.system.info.equipment_stop_active = false;
     datalayer.system.status.dc_bus_live = true;
+    pylon_debug.mute = PylonDebug::MUTE_NONE;
+    pylon_debug.clear_periodic();
     clear_transmitted_frames();
   }
   void advance(uint32_t ms) { set_millis64(millis64() + ms); }
@@ -171,6 +173,40 @@ TEST_F(PylonRelayTest, ModeOffSendsTheOriginalFrames) {
     EXPECT_NE(frame.ID & 0xFFF0, 0x8220u);
   }
   EXPECT_TRUE(datalayer.system.status.dc_bus_live);
+}
+
+TEST_F(PylonRelayTest, DebugMuteRelayKeepsPollingAndSendsQueuedFrames) {
+  user_selected_pylon_relay_control = 1;
+  pylon_debug.mute = PylonDebug::MUTE_RELAY;
+  CAN_frame sleep = {.FD = false, .ext_ID = true, .DLC = 8, .ID = 0x8201, .data = {0x55}};
+  ASSERT_TRUE(pylon_debug.enqueue(sleep));
+  PylonBattery battery;
+  battery.setup();
+  battery.transmit_can(millis());
+
+  ASSERT_NE(find_frame(0x8201), nullptr);
+  EXPECT_EQ(find_frame(0x8201)->data.u8[0], 0x55);  // Only the queued one, not the driver's AA
+  EXPECT_EQ(find_frame(0x8221), nullptr);
+  EXPECT_EQ(find_frame(0x8211), nullptr);
+  EXPECT_NE(find_frame(0x4200), nullptr);  // Still polling the BMS
+
+  clear_transmitted_frames();
+  advance(1000);
+  battery.transmit_can(millis());
+  EXPECT_EQ(find_frame(0x8201), nullptr);  // Queued frames go out once
+}
+
+TEST_F(PylonRelayTest, DebugModeChangeAtRuntimeStartsOver) {
+  user_selected_pylon_relay_control = 2;
+  PylonBattery battery;
+  battery.setup();
+  battery.transmit_can(millis());
+  EXPECT_FALSE(datalayer.system.status.dc_bus_live);
+
+  user_selected_pylon_relay_control = 0;
+  clear_transmitted_frames();
+  battery.transmit_can(millis());
+  EXPECT_TRUE(datalayer.system.status.dc_bus_live);  // Mode 0 leaves the flag at its default
 }
 
 TEST_F(PylonRelayTest, ModeOffAutoAddressAcceptsOnlyAddressZeroAndOne) {

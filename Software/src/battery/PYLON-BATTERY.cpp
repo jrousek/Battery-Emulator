@@ -11,6 +11,8 @@
 /*Based on CAN-Bus-Protocol-Pylon-high-voltage-V1.26-20210903.pdf , which is the Pylontech 1.26 std.
   Address handling, 0x42B0-0x42D0, 0x8220/0x8230 and relay control from V1.29-20220926. */
 
+PylonDebug pylon_debug;
+
 void PylonBattery::update_values() {
 
   datalayer_battery->status.real_soc = (SOC * 100);  //increase SOC range from 0-100 -> 100.00
@@ -288,15 +290,25 @@ void PylonBattery::handle_ensemble_frame(uint32_t family, const CAN_frame& rx_fr
       extended_data.temp_max_sensor = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
       extended_data.temp_min_sensor = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
       break;
-    case 0x4250:
+    case 0x4250: {
       //Byte1-2 Cycle Period
+      const uint8_t raw = rx_frame.data.u8[0];
+      const uint8_t fault = rx_frame.data.u8[3];
+      const uint16_t alarm = (rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4];
+      const uint16_t protection = (rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6];
+      if (!extended_data.have_4250 || raw != extended_data.basic_status_raw || fault != extended_data.fault ||
+          alarm != extended_data.alarm || protection != extended_data.protection) {
+        // Every change is logged: which bits follow the relay is not known for every BMS
+        logging.printf("[Pylon] 0x4250: status 0x%02X fault 0x%02X alarm 0x%04X protection 0x%04X\n", raw, fault, alarm,
+                       protection);
+      }
       extended_data.have_4250 = true;
-      extended_data.basic_status = rx_frame.data.u8[0] & 0x07;
-      extended_data.basic_status_raw = rx_frame.data.u8[0];
-      extended_data.fault = rx_frame.data.u8[3];
-      extended_data.alarm = (rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4];
-      extended_data.protection = (rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6];
-      break;
+      extended_data.basic_status = raw & 0x07;
+      extended_data.basic_status_raw = raw;
+      extended_data.fault = fault;
+      extended_data.alarm = alarm;
+      extended_data.protection = protection;
+    } break;
     case 0x4260:
       //Byte0-1 Module Max Voltage
       //Byte2-3 Module Min Voltage
@@ -310,6 +322,10 @@ void PylonBattery::handle_ensemble_frame(uint32_t family, const CAN_frame& rx_fr
       //Byte6-7 Module Min. Temperature Number
       break;
     case 0x4280:
+      if (rx_frame.data.u8[0] != charge_forbidden || rx_frame.data.u8[1] != discharge_forbidden) {
+        logging.printf("[Pylon] 0x4280: charge forbidden 0x%02X discharge forbidden 0x%02X\n", rx_frame.data.u8[0],
+                       rx_frame.data.u8[1]);
+      }
       charge_forbidden = rx_frame.data.u8[0];
       discharge_forbidden = rx_frame.data.u8[1];
       extended_data.charge_forbidden = charge_forbidden;
@@ -406,6 +422,26 @@ void PylonBattery::update_dc_bus_live(unsigned long currentMillis) {
 }
 
 void PylonBattery::transmit_can(unsigned long currentMillis) {
+  // Bench debugging (PYLON-DEBUG.h): frames queued from the web or USB console go out from here
+  pylon_debug.service(currentMillis, [this](const CAN_frame* frame) { transmit_can_frame(frame); });
+  if (pylon_debug.mute == PylonDebug::MUTE_ALL) {
+    return;
+  }
+  const bool relay_muted = pylon_debug.mute == PylonDebug::MUTE_RELAY;
+
+  // The debug console can change the mode at runtime; start over as after a boot
+  if (user_selected_pylon_relay_control != active_relay_mode) {
+    if (active_relay_mode != 0xFF) {
+      logging.printf("[Pylon] Relay control mode %u -> %u\n", active_relay_mode, user_selected_pylon_relay_control);
+      if (user_selected_pylon_relay_control == RELAY_MODE_OFF && allows_contactor_closing != nullptr &&
+          !contactor_control_enabled) {
+        datalayer.system.status.dc_bus_live = true;  // Mode 0 leaves the flag at its default, as originally
+      }
+    }
+    active_relay_mode = user_selected_pylon_relay_control;
+    relay_commands_sent = false;
+  }
+
   const bool relay_control = user_selected_pylon_relay_control != RELAY_MODE_OFF;
   const bool want_closed =
       datalayer.system.status.inverter_allows_contactor_closing && !datalayer.system.info.equipment_stop_active;
@@ -422,9 +458,11 @@ void PylonBattery::transmit_can(unsigned long currentMillis) {
       want_closed_since_ms = currentMillis;
     }
     if (relay_control) {
-      logging.printf("[Pylon] Relay %s requested, BMS address %u\n", want_closed ? "close" : "open",
-                     extended_data.command_address);
-      send_relay_commands(want_closed);  // Right away, not only on the next 1 s tick
+      logging.printf("[Pylon] Relay %s requested, BMS address %u%s\n", want_closed ? "close" : "open",
+                     extended_data.command_address, relay_muted ? " (muted by debug)" : "");
+      if (!relay_muted) {
+        send_relay_commands(want_closed);  // Right away, not only on the next 1 s tick
+      }
       if (!want_closed && owns_dc_bus_live()) {
         datalayer.system.status.dc_bus_live = false;
       }
@@ -440,7 +478,9 @@ void PylonBattery::transmit_can(unsigned long currentMillis) {
     transmit_can_frame(&PYLON_3010);  // Heartbeat
     transmit_can_frame(&PYLON_4200);  // Ensemble OR System equipment info, depends on frame0
 
-    if (relay_control) {
+    if (relay_muted) {
+      // Debug: only the frames queued from the console control the relay
+    } else if (relay_control) {
       send_relay_commands(want_closed);
     } else {
       // Relay control Off: the original messages, unaddressed, no 0x8220

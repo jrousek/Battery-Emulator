@@ -19,6 +19,7 @@
 #include "src/communication/rs485/comm_rs485.h"
 #include "src/datalayer/battery_aggregate.h"
 #include "src/datalayer/datalayer.h"
+#include "src/devboard/debug/pylon_debug.h"
 #include "src/devboard/display/display.h"
 #include "src/devboard/espnow/espnow.h"
 #include "src/devboard/mqtt/mqtt.h"
@@ -815,4 +816,5 @@ void setup() {
 // it.
 void loop() {
   ota_confirm_service();
+  pylon_debug_poll_serial();  // Bench console for the Pylon relay control (devboard/debug/pylon_debug.cpp)
 }

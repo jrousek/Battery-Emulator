@@ -18,6 +18,7 @@
 #include "../../datalayer/battery_aggregate.h"
 #include "../../datalayer/datalayer.h"
 #include "../../datalayer/datalayer_extended.h"
+#include "../../devboard/debug/pylon_debug.h"
 #include "../../devboard/safety/safety.h"
 #include "../../inverter/INVERTERS.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
@@ -441,6 +442,12 @@ void init_webserver() {
     prefs.putBool(index ? "BYDBALAUTO2" : "BYDBALAUTO", enabled);
     prefs.end();
     request->send(204);
+  });
+
+  // Bench console for the Pylon relay control, e.g. /pylondbg?c=tx%208201%2055 (see devboard/debug/pylon_debug.cpp)
+  def_route_with_auth("/pylondbg", server, HTTP_GET, [](AsyncWebServerRequest* request) {
+    String command = request->hasParam("c") ? request->getParam("c")->value() : String("help");
+    request->send(200, "text/plain", pylon_debug_command(command));
   });
 
   // Route for going to CAN tools web page

@@ -3,6 +3,7 @@
 
 #include "../datalayer/datalayer.h"
 #include "CanBattery.h"
+#include "PYLON-DEBUG.h"
 #include "PYLON-HTML.h"
 
 extern uint16_t user_selected_pylon_baudrate;
@@ -148,7 +149,8 @@ class PylonBattery : public CanBattery {
   int16_t old_frame_current_dA = 0;
   bool current_sign_checked = false;
 
-  int8_t locked_rx_address = -1;  // Auto mode: address nibble of the first ensemble frame, -1 until seen
+  int8_t locked_rx_address = -1;     // Auto mode: address nibble of the first ensemble frame, -1 until seen
+  uint8_t active_relay_mode = 0xFF;  // Mode the commands were last computed for, 0xFF before the first call
   bool previous_want_closed = false;
   bool relay_commands_sent = false;
   unsigned long want_closed_since_ms = 0;
