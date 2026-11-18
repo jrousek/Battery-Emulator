@@ -37,6 +37,11 @@ const char* mqtt_server_default = "";
 int mqtt_port = mqtt_port_default;
 std::string mqtt_server = mqtt_server_default;
 
+bool mqtt_tls_enabled = false;
+// esp-mqtt keeps a pointer to this buffer instead of copying it, so it must live as long as the client.
+std::string mqtt_ca_cert;
+bool mqtt_commands_disabled = false;
+
 #define MQTT_QOS 0  // MQTT Quality of Service (0, 1, or 2) //TODO: Should this be configurable?
 char* mqtt_msg = nullptr;
 // Cap on the esp-mqtt outbox, in bytes. QoS>0 traffic queues in the outbox while the broker
@@ -1237,6 +1242,11 @@ bool publish_events() {
 }
 
 static bool publish_buttons_discovery(void) {
+  if (mqtt_commands_disabled) {
+    // Buttons would publish to command topics nobody listens to, so none are offered.
+    ha_buttons_published = true;
+    return true;
+  }
   if (ha_autodiscovery_enabled) {
     if (ha_buttons_published == false) {
       DocClearGuard guard(shared_doc);
@@ -1278,10 +1288,16 @@ static bool publish_buttons_discovery(void) {
 }
 
 static void subscribe() {
+  if (mqtt_commands_disabled) {
+    return;
+  }
   esp_mqtt_client_subscribe(client, (topic_name + "/command/+").c_str(), 1);
 }
 
 void mqtt_message_received(char* topic_raw, int topic_len, char* data, int data_len) {
+  if (mqtt_commands_disabled) {
+    return;  // Not subscribed, but a broker could still deliver a message: never act on it
+  }
 
   char* topic = strndup(topic_raw, topic_len);
 
@@ -1442,6 +1458,21 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
       mqtt_message_received(event->topic, event->topic_len, event->data, event->data_len);
       break;
     case MQTT_EVENT_ERROR:
+      // A refused TLS handshake (wrong CA, name mismatch, expired certificate) is otherwise
+      // invisible. Logged when the error changes, not on every reconnect attempt.
+      if (mqtt_tls_enabled && event->error_handle != nullptr &&
+          event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        static int last_tls_err = 0;
+        static int last_tls_stack_err = 0;
+        const int tls_err = event->error_handle->esp_tls_last_esp_err;
+        const int tls_stack_err = event->error_handle->esp_tls_stack_err;
+        if (tls_err != last_tls_err || tls_stack_err != last_tls_stack_err) {
+          last_tls_err = tls_err;
+          last_tls_stack_err = tls_stack_err;
+          logging.printf("MQTT TLS error 0x%x, mbedtls -0x%x, cert flags 0x%x\n", tls_err, -tls_stack_err,
+                         event->error_handle->esp_tls_cert_verify_flags);
+        }
+      }
       // logging.println("MQTT_ERROR");
       // logging.print("reported from esp-tls");
       // logging.println(event->error_handle->esp_tls_last_esp_err);
@@ -1499,7 +1530,22 @@ bool init_mqtt(void) {
 
   String clientId = String("BatteryEmulatorClient-") + hostname;
 
-  mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+  if (mqtt_tls_enabled) {
+    if (mqtt_ca_cert.find("-----BEGIN CERTIFICATE-----") == std::string::npos) {
+      // Never fall back to plain TCP or to an unverified connection.
+      logging.println("ERROR: MQTT TLS is on but no CA certificate is set. MQTT will not connect.");
+      return false;
+    }
+    mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_SSL;
+    mqtt_cfg.broker.verification.certificate = mqtt_ca_cert.c_str();
+    mqtt_cfg.broker.verification.certificate_len = 0;  // 0 = null-terminated PEM
+    // The certificate's name must match the server setting (default, stated for clarity).
+    mqtt_cfg.broker.verification.skip_cert_common_name_check = false;
+    // The TLS handshake runs on the esp-mqtt task and needs more stack than plain TCP.
+    mqtt_cfg.task.stack_size = 8192;
+  } else {
+    mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+  }
   mqtt_cfg.broker.address.hostname = mqtt_server.c_str();
   mqtt_cfg.broker.address.port = mqtt_port;
   mqtt_cfg.credentials.client_id = clientId.c_str();

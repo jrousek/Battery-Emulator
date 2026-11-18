@@ -599,7 +599,7 @@ void init_webserver() {
       "PYLONOFFSET",  "PYLONORDER",    "DEYEBYD",    "NCCONTACTOR",  "TRIBTR",        "CNTCTRLTRI",     "ESPNOWENABLED",
       "PRIMOGEN24",   "LOWPASSFILTER", "WEBAUTH",    "SLOWCANINV",   "CHGTAPERSOC",   "MEASURECPUTEMP", "SYSLOGEN",
       "PERBMSDEFSOC", "PERBMSSKIPBAL", "INVOFFGRID", "CHGESTIMATED", "MQTTHEAP",      "HADISCFWU",      "INVACCREB",
-      "LEAFAUTOOFS",  "PARHEADROOM",
+      "LEAFAUTOOFS",  "PARHEADROOM",   "MQTTTLS",    "MQTTNOCMD",
 #ifndef SMALL_FLASH_DEVICE
       "CTINVERT",
 #endif  // SMALL_FLASH_DEVICE
@@ -622,9 +622,9 @@ void init_webserver() {
 #endif  // SMALL_FLASH_DEVICE
   };
 
-  const char* stringSettingNames[] = {"APPASSWORD", "HOSTNAME",    "MQTTSERVER", "MQTTUSER",  "MQTTPASSWORD",
-                                      "HTTPUSER",   "HTTPPASS",    "LOCALIP",    "GATEWAY",   "SUBNET",
-                                      "DNS",        "HADISCTOPIC", "SYSLOGIP",   "ESPNOWMACS"};
+  const char* stringSettingNames[] = {"APPASSWORD", "HOSTNAME",    "MQTTSERVER", "MQTTUSER",   "MQTTPASSWORD",
+                                      "HTTPUSER",   "HTTPPASS",    "LOCALIP",    "GATEWAY",    "SUBNET",
+                                      "DNS",        "HADISCTOPIC", "SYSLOGIP",   "ESPNOWMACS", "MQTTCA"};
 
   // Balancing strategy of the 1st, 2nd and 3rd Nissan LEAF pack
   const char* leafChgStaRqNames[] = {"CHGSTARQ", "CHGSTARQ2", "CHGSTARQ3"};

@@ -1,5 +1,6 @@
 #include "comm_nvm.h"
 #include <esp_phy_init.h>  // esp_phy_erase_cal_data_in_nvs()
+#include <algorithm>
 #include "../../battery/BATTERIES.h"
 #include "../../battery/Battery.h"
 #ifndef SMALL_FLASH_DEVICE  // Chargers are left out of the small flash devices
@@ -330,6 +331,11 @@ void init_stored_settings() {
   mqtt_port = settings.getUInt("MQTTPORT", 1883);
   mqtt_user = settings.getString("MQTTUSER").c_str();
   mqtt_password = settings.getString("MQTTPASSWORD").c_str();
+  mqtt_tls_enabled = settings.getBool("MQTTTLS", false);
+  mqtt_commands_disabled = settings.getBool("MQTTNOCMD", false);
+  mqtt_ca_cert = settings.getString("MQTTCA").c_str();
+  // A pasted certificate arrives with CRLF line ends from the browser, keep plain LF for mbedtls
+  mqtt_ca_cert.erase(std::remove(mqtt_ca_cert.begin(), mqtt_ca_cert.end(), '\r'), mqtt_ca_cert.end());
 
 #ifndef SMALL_FLASH_DEVICE
   // CHAdeMO CT Clamp settings

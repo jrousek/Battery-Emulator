@@ -71,6 +71,12 @@ extern std::string mqtt_server;
 extern std::string mqtt_user;
 extern std::string mqtt_password;
 extern int mqtt_port;
+// TLS: the broker certificate is verified against mqtt_ca_cert (PEM, one or more CA
+// certificates). The firmware has no built-in CA bundle, so TLS without a CA does not connect.
+extern bool mqtt_tls_enabled;
+extern std::string mqtt_ca_cert;
+// Publish only: the emulator neither subscribes to nor acts on the command topics.
+extern bool mqtt_commands_disabled;
 extern const char* mqtt_topic_name;
 extern const char* mqtt_object_id_prefix;
 extern const char* mqtt_device_name;

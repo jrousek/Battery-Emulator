@@ -861,6 +861,18 @@ String raw_settings_processor(const String& var, BatteryEmulatorSettingsStore& s
     return String("");
   }
 
+  if (var == "MQTTTLS") {
+    return settings.getBool("MQTTTLS") ? "checked" : "";
+  }
+
+  if (var == "MQTTCA") {
+    return settings.getString("MQTTCA");
+  }
+
+  if (var == "MQTTNOCMD") {
+    return settings.getBool("MQTTNOCMD") ? "checked" : "";
+  }
+
   if (var == "MQTTTIMEOUT") {
     // Capped like at load: an out-of-range saved value would otherwise block the form submit.
     return String(mqtt_clamp_timeout_ms(settings.getUInt("MQTTTIMEOUT", 2000)));
@@ -1914,6 +1926,11 @@ String qnhck_zero_text(uint16_t zero_mV) {
       display: contents;
     }
 
+    form .if-mqtttls { display: none; }
+    form[data-mqtttls="true"] .if-mqtttls {
+      display: contents;
+    }
+
     form .if-hadiscen { display: none; }
     form[data-hadiscen="true"] .if-hadiscen {
       display: contents;
@@ -2558,6 +2575,15 @@ String qnhck_zero_text(uint16_t zero_mV) {
         pattern="[ -~]+" />
         <label>Password: </label><input type='password' name='MQTTPASSWORD' value="%MQTTPASSWORD%" autocomplete="new-password"
         pattern="[ -~]+" placeholder='Leave blank to keep unchanged' />
+        <label>Use TLS (encrypted): </label>
+        <input type='checkbox' name='MQTTTLS' value='on' %MQTTTLS% />
+        <div class='if-mqtttls'>
+        <label>Server CA certificate (PEM): </label>
+        <textarea name='MQTTCA' rows='6' maxlength='3900' spellcheck='false'
+        placeholder='-----BEGIN CERTIFICATE-----'>%MQTTCA%</textarea>
+        </div>
+        <label>Publish only, ignore commands: </label>
+        <input type='checkbox' name='MQTTNOCMD' value='on' %MQTTNOCMD% />
         <label>Timeout (ms): </label>
         <input name='MQTTTIMEOUT' type='number' value="%MQTTTIMEOUT%" 
         min="2000" max="20000" step="1" />
