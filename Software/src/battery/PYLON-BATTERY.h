@@ -6,6 +6,9 @@
 #include "PYLON-HTML.h"
 
 extern uint16_t user_selected_pylon_baudrate;
+extern uint8_t user_selected_pylon_bms_address;
+extern uint8_t user_selected_pylon_relay_control;
+extern uint16_t user_selected_pylon_relay_close_delay_ms;
 
 class PylonBattery : public CanBattery {
  public:
@@ -44,6 +47,18 @@ class PylonBattery : public CanBattery {
   static const uint32_t PYLON_CELL_VOLTAGE_BASE_ID = 0x19B50100;    // Base CAN ID for cell voltages
   static const uint32_t PYLON_CELL_BALANCING_BASE_ID = 0x19B50300;  // Base CAN ID for balancing status
 
+  static const uint8_t RELAY_MODE_OFF = 0;
+  static const uint8_t RELAY_MODE_FORCE = 1;
+  static const uint8_t RELAY_MODE_SLEEP = 2;
+  static const uint8_t FAULT_RELAY_ERR = 0x20;  // 0x4250+A Byte3, Table 2 bit5
+  static const unsigned long BMS_SILENT_AFTER_MS = 5000;
+
+  bool accept_address(uint8_t address);
+  void handle_ensemble_frame(uint32_t family, const CAN_frame& rx_frame);
+  void send_relay_commands(bool want_closed);
+  bool owns_dc_bus_live();
+  void update_dc_bus_live(unsigned long currentMillis);
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
 
   // If not null, this battery decides when the contactor can be closed and writes the value here.
@@ -71,6 +86,11 @@ class PylonBattery : public CanBattery {
                           .DLC = 8,
                           .ID = 0x8210,
                           .data = {0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  CAN_frame PYLON_8220 = {.FD = false,
+                          .ext_ID = true,
+                          .DLC = 8,
+                          .ID = 0x8220,  //AA force main relay open, 55 allow closing again
+                          .data = {0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
   CAN_frame PYLON_4200 = {.FD = false,
                           .ext_ID = true,
                           .DLC = 8,
@@ -119,6 +139,21 @@ class PylonBattery : public CanBattery {
   uint8_t software_version_major = 0;
   uint8_t software_version_minor = 0;
   uint8_t actual_cell_count = 0;  // Actual number of cells detected from EMUS
+
+  // Once a V1.27+ frame has been seen it wins over the old frame carrying the same values
+  bool new_voltage_frame_seen = false;  // 0x42B0 replaces voltage/current/SOC/SOH of 0x4210
+  bool new_cutoff_frame_seen = false;   // 0x42C0 replaces BMS temperature of 0x4210 and cutoffs of 0x4220
+  bool new_current_frame_seen = false;  // 0x42D0 replaces current limits of 0x4220
+
+  int16_t old_frame_current_dA = 0;
+  bool current_sign_checked = false;
+
+  int8_t locked_rx_address = -1;  // Auto mode: address nibble of the first ensemble frame, -1 until seen
+  bool previous_want_closed = false;
+  bool relay_commands_sent = false;
+  unsigned long want_closed_since_ms = 0;
+  unsigned long last_bms_frame_ms = 0;
+  bool bms_frame_seen = false;
 };
 
 #endif

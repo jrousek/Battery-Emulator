@@ -130,6 +130,10 @@ static const std::map<int, String> bmw_i3_soc_havrla_modes = {{0, "Disable (use 
 // (normal charge), 10b (quick charge). 11b (charge stop request) is deliberately not offered.
 static const std::map<int, String> leaf_chg_sta_rq = {{0, "Aggressive"}, {1, "Conservative"}, {2, "Off"}};
 
+static const std::map<int, String> pylon_relay_modes = {{0, "Off (original)"},
+                                                        {1, "Force relay (0x822x)"},
+                                                        {2, "Sleep/Wake (0x820x)"}};
+
 static const std::map<int, String> tesla_countries = {
     {21843, "US (USA)"},     {17217, "CA (Canada)"},  {18242, "GB (UK & N Ireland)"},
     {17483, "DK (Denmark)"}, {17477, "DE (Germany)"}, {16725, "AU (Australia)"}};
@@ -1077,6 +1081,19 @@ String raw_settings_processor(const String& var, BatteryEmulatorSettingsStore& s
     return String(settings.getUInt("PYLONBAUD", 500));
   }
 
+  if (var == "PYLONADDR") {
+    return String(settings.getUInt("PYLONADDR", 0));
+  }
+
+  if (var == "PYLONRELAY") {
+    uint32_t mode = settings.getUInt("PYLONRELAY", 0);
+    return options_from_map(mode > 2 ? 0 : mode, pylon_relay_modes);
+  }
+
+  if (var == "PYLONRLYMS") {
+    return String(settings.getUInt("PYLONRLYMS", 3000));
+  }
+
   if (var == "INVCELLS") {
     return String(settings.getUInt("INVCELLS", 0));
   }
@@ -1914,10 +1931,11 @@ String qnhck_zero_text(uint16_t zero_mV) {
     </style>
 )rawliteral"
 
-#define SETTINGS_HTML_BODY          \
+#define SETTINGS_HTML_BODY                                                                               \
   R"rawliteral(
-  )rawliteral" INDEX_HTML_NAV_START \
-  R"rawliteral(<button onclick="askFactoryReset()">Factory reset</button>)rawliteral" INDEX_HTML_NAV_END R"rawliteral(
+  )rawliteral" INDEX_HTML_NAV_START                                                                      \
+  R"rawliteral(<button onclick="askFactoryReset()">Factory reset</button>)rawliteral" INDEX_HTML_NAV_END \
+  R"rawliteral(
 
   <script>
   function validateWebAuthPassword() {
@@ -2197,6 +2215,15 @@ String qnhck_zero_text(uint16_t zero_mV) {
         <div class="if-pylon-battery">
         <label>Pylon CAN baudrate (kbps): </label>
         <input name='PYLONBAUD' type='text' value="%PYLONBAUD%" pattern="[0-9]+"/>
+
+        <label>Pylon BMS address (0 = auto): </label>
+        <input name='PYLONADDR' type='text' value="%PYLONADDR%" pattern="([0-9]|1[0-5])"/>
+
+        <label>Pylon relay control: </label>
+        <select name='PYLONRELAY'>%PYLONRELAY%</select>
+
+        <label>Pylon relay close delay (ms): </label>
+        <input name='PYLONRLYMS' type='text' value="%PYLONRLYMS%" pattern="([0-9]{1,4}|[12][0-9]{4}|30000)"/>
         </div>
 
         <div class="if-cbms">

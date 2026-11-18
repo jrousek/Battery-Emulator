@@ -1,11 +1,15 @@
 #include "PYLON-BATTERY.h"
+#include <string.h>
 #include "../battery/BATTERIES.h"
 #include "../communication/can/comm_can.h"
+#include "../communication/contactorcontrol/comm_contactorcontrol.h"
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"  //For "More battery info" webpage
 #include "../devboard/utils/events.h"
+#include "../devboard/utils/logging.h"
 
-/*Based on CAN-Bus-Protocol-Pylon-high-voltage-V1.26-20210903.pdf , which is the Pylontech 1.26 std */
+/*Based on CAN-Bus-Protocol-Pylon-high-voltage-V1.26-20210903.pdf , which is the Pylontech 1.26 std.
+  Address handling, 0x42B0-0x42D0, 0x8220/0x8230 and relay control from V1.29-20220926. */
 
 void PylonBattery::update_values() {
 
@@ -63,6 +67,16 @@ void PylonBattery::update_values() {
   if (user_selected_min_pack_voltage_dV == 0) {
     datalayer_battery->info.min_design_voltage_dV = discharge_cutoff_voltage;
   }
+
+  /* Sleep/Wake mode: a BMS we put to sleep on purpose may stop sending. safety.cpp counts
+     CAN_battery_still_alive down once per second and raises EVENT_CAN_BATTERY_MISSING at 0, so it is
+     held up while the sleep is commanded. Only after the BMS has been heard once, so a BMS that never
+     answered is still reported. Once wake is requested the hold stops and the normal 60 s check runs. */
+  if (user_selected_pylon_relay_control == RELAY_MODE_SLEEP && !extended_data.want_closed && bms_frame_seen) {
+    datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+  }
+
+  update_dc_bus_live(millis());
 }
 
 void PylonBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
@@ -116,67 +130,27 @@ void PylonBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       manufacturer_name[14] = rx_frame.data.u8[6];
       manufacturer_name[15] = rx_frame.data.u8[7];
       break;
-    case 0x4210:
-    case 0x4211:
-      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
-      voltage_dV = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
-      current_dA = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]) - 30000;
-      BMS_temperature_dC = (((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4])) - 1000;
-      SOC = rx_frame.data.u8[6];
-      SOH = rx_frame.data.u8[7];
+    case 0x42B0 ... 0x42EF:  // V1.27+ replacements, 0x42B0+A ... 0x42E0+A
+      if (user_selected_pylon_relay_control == RELAY_MODE_OFF) {
+        break;  // Relay control Off keeps the original parser, which never read these
+      }
+      [[fallthrough]];
+    case 0x4210 ... 0x429F:  // Ensemble info, 0x4210+A ... 0x4290+A
+      if (accept_address(rx_frame.ID & 0x000F)) {
+        handle_ensemble_frame(rx_frame.ID & 0xFFF0, rx_frame);
+      }
       break;
-    case 0x4220:
-    case 0x4221:
-      charge_cutoff_voltage = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
-      discharge_cutoff_voltage = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
-      max_charge_current_dA = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]) - 30000;
-      // Some BMS (e.g. GCE) encode the discharge limit with a positive offset like the
-      // charge limit, instead of the standard negative offset. abs() handles both.
-      max_discharge_current_dA = abs((((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]) - 30000));
-      break;
-    case 0x4230:
-    case 0x4231:
-      cellvoltage_max_mV = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
-      cellvoltage_min_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
-      extended_data.cell_max_number = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
-      extended_data.cell_min_number = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
-      break;
-    case 0x4240:
-    case 0x4241:
-      celltemperature_max_dC = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]) - 1000;
-      celltemperature_min_dC = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]) - 1000;
-      extended_data.temp_max_sensor = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
-      extended_data.temp_min_sensor = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
-      break;
-    case 0x4250:
-    case 0x4251:
-      //Byte0 Basic Status
-      //Byte1-2 Cycle Period
-      //Byte3 Error
-      //Byte4-5 Alarm
-      //Byte6-7 Protection
-      break;
-    case 0x4260:
-    case 0x4261:
-      //Byte0-1 Module Max Voltage
-      //Byte2-3 Module Min Voltage
-      //Byte4-5 Module Max. Voltage Number
-      //Byte6-7 Module Min. Voltage Number
-      break;
-    case 0x4270:
-    case 0x4271:
-      //Byte0-1 Module Max. Temperature
-      //Byte2-3 Module Min. Temperature
-      //Byte4-5 Module Max. Temperature Number
-      //Byte6-7 Module Min. Temperature Number
-      break;
-    case 0x4280:
-    case 0x4281:
-      charge_forbidden = rx_frame.data.u8[0];
-      discharge_forbidden = rx_frame.data.u8[1];
-      break;
-    case 0x4290:
-    case 0x4291:
+    case 0x8230 ... 0x823F:  // Answer to the forced relay command 0x8220+A
+      // Logged only when it changes, the BMS may answer every second
+      if (!extended_data.have_8230_response || memcmp(extended_data.last_8230_data, rx_frame.data.u8, 8) != 0) {
+        logging.printf("[Pylon] 0x%04X relay answer: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                       (unsigned int)rx_frame.ID, rx_frame.data.u8[0], rx_frame.data.u8[1], rx_frame.data.u8[2],
+                       rx_frame.data.u8[3], rx_frame.data.u8[4], rx_frame.data.u8[5], rx_frame.data.u8[6],
+                       rx_frame.data.u8[7]);
+      }
+      extended_data.have_8230_response = true;
+      extended_data.last_8230_response_millis = millis();
+      memcpy(extended_data.last_8230_data, rx_frame.data.u8, 8);
       break;
     case 0x18FF9A6E:
       if (rx_frame.data.u8[0] == 0x03) {
@@ -245,30 +219,245 @@ void PylonBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
   }
 }
 
+bool PylonBattery::accept_address(uint8_t address) {
+  if (user_selected_pylon_bms_address != 0) {
+    return address == user_selected_pylon_bms_address;
+  }
+  if (user_selected_pylon_relay_control == RELAY_MODE_OFF) {
+    return address <= 1;  // What the driver always accepted: 0x42x0 and 0x42x1
+  }
+  // Auto: follow the first BMS heard, so a second pack on the bus cannot mix its values in
+  return locked_rx_address < 0 || address == locked_rx_address;
+}
+
+static inline int32_t le_int32(const CAN_frame& frame, uint8_t index) {
+  return (int32_t)((uint32_t)frame.data.u8[index] | ((uint32_t)frame.data.u8[index + 1] << 8) |
+                   ((uint32_t)frame.data.u8[index + 2] << 16) | ((uint32_t)frame.data.u8[index + 3] << 24));
+}
+
+static inline int16_t clamp_int16(int32_t value, int32_t low) {
+  return (int16_t)(value < low ? low : (value > INT16_MAX ? INT16_MAX : value));
+}
+
+void PylonBattery::handle_ensemble_frame(uint32_t family, const CAN_frame& rx_frame) {
+  const uint8_t address = rx_frame.ID & 0x000F;
+  if (locked_rx_address < 0) {
+    locked_rx_address = address;
+    extended_data.bms_address_detected = address == 0 ? 1 : address;
+    logging.printf("[Pylon] BMS heard on address %u (0x%04X)\n", address, (unsigned int)rx_frame.ID);
+  }
+  last_bms_frame_ms = millis();
+  bms_frame_seen = true;
+
+  switch (family) {
+    case 0x4210:
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      extended_data.old_frames_seen = true;
+      old_frame_current_dA = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]) - 30000;
+      if (!new_voltage_frame_seen) {
+        voltage_dV = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
+        current_dA = old_frame_current_dA;
+        SOC = rx_frame.data.u8[6];
+        SOH = rx_frame.data.u8[7];
+      }
+      if (!new_cutoff_frame_seen) {
+        BMS_temperature_dC = (((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4])) - 1000;
+      }
+      break;
+    case 0x4220:
+      if (!new_cutoff_frame_seen) {
+        charge_cutoff_voltage = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
+        discharge_cutoff_voltage = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
+      }
+      if (!new_current_frame_seen) {
+        max_charge_current_dA = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]) - 30000;
+        // Some BMS (e.g. GCE) encode the discharge limit with a positive offset like the
+        // charge limit, instead of the standard negative offset. abs() handles both.
+        max_discharge_current_dA = abs((((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]) - 30000));
+      }
+      break;
+    case 0x4230:
+      cellvoltage_max_mV = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
+      cellvoltage_min_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
+      extended_data.cell_max_number = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
+      extended_data.cell_min_number = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
+      break;
+    case 0x4240:
+      celltemperature_max_dC = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]) - 1000;
+      celltemperature_min_dC = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]) - 1000;
+      extended_data.temp_max_sensor = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
+      extended_data.temp_min_sensor = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
+      break;
+    case 0x4250:
+      //Byte1-2 Cycle Period
+      extended_data.have_4250 = true;
+      extended_data.basic_status = rx_frame.data.u8[0] & 0x07;
+      extended_data.fault = rx_frame.data.u8[3];
+      extended_data.alarm = (rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4];
+      extended_data.protection = (rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6];
+      break;
+    case 0x4260:
+      //Byte0-1 Module Max Voltage
+      //Byte2-3 Module Min Voltage
+      //Byte4-5 Module Max. Voltage Number
+      //Byte6-7 Module Min. Voltage Number
+      break;
+    case 0x4270:
+      //Byte0-1 Module Max. Temperature
+      //Byte2-3 Module Min. Temperature
+      //Byte4-5 Module Max. Temperature Number
+      //Byte6-7 Module Min. Temperature Number
+      break;
+    case 0x4280:
+      charge_forbidden = rx_frame.data.u8[0];
+      discharge_forbidden = rx_frame.data.u8[1];
+      extended_data.charge_forbidden = charge_forbidden;
+      extended_data.discharge_forbidden = discharge_forbidden;
+      break;
+    case 0x42B0: {
+      // Same sign convention as 0x4210 (raw - 30000), just without the offset
+      const int32_t new_current_dA = le_int32(rx_frame, 2);
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      if (!current_sign_checked && extended_data.old_frames_seen) {
+        current_sign_checked = true;
+        const bool opposite =
+            (old_frame_current_dA > 20 && new_current_dA < -20) || (old_frame_current_dA < -20 && new_current_dA > 20);
+        logging.printf("[Pylon] Current check: 0x4210 %d dA, 0x42B0 %ld dA%s\n", old_frame_current_dA,
+                       (long)new_current_dA, opposite ? " - SIGN MISMATCH" : "");
+      }
+      new_voltage_frame_seen = true;
+      extended_data.new_frames_seen = true;
+      voltage_dV = ((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
+      current_dA = clamp_int16(new_current_dA, INT16_MIN);
+      SOC = rx_frame.data.u8[6];
+      SOH = rx_frame.data.u8[7];
+    } break;
+    case 0x42C0:
+      new_cutoff_frame_seen = true;
+      extended_data.new_frames_seen = true;
+      BMS_temperature_dC = (((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0])) - 1000;
+      charge_cutoff_voltage = ((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
+      discharge_cutoff_voltage = ((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
+      break;
+    case 0x42D0:
+      new_current_frame_seen = true;
+      extended_data.new_frames_seen = true;
+      max_charge_current_dA = clamp_int16(le_int32(rx_frame, 0), 0);
+      max_discharge_current_dA = clamp_int16(abs(le_int32(rx_frame, 4)), 0);
+      break;
+    default:  // 0x4290 and 0x42E0 are not used
+      break;
+  }
+}
+
+// Relay modes 1 and 2 only. Mode 0 is sent by transmit_can() exactly as before.
+void PylonBattery::send_relay_commands(bool want_closed) {
+  const uint8_t address = extended_data.command_address;
+
+  PYLON_8200.ID = 0x8200 + address;
+  if (user_selected_pylon_relay_control == RELAY_MODE_SLEEP) {
+    PYLON_8200.data.u8[0] = want_closed ? 0xAA : 0x55;  // AA = Quit sleep, 55 = Goto sleep
+  } else {
+    PYLON_8200.data.u8[0] = 0xAA;
+  }
+  transmit_can_frame(&PYLON_8200);
+
+  if (user_selected_pylon_relay_control == RELAY_MODE_FORCE) {
+    PYLON_8220.ID = 0x8220 + address;
+    PYLON_8220.data.u8[0] = want_closed ? 0x55 : 0xAA;  // 55 = closing allowed again, AA = force open
+    transmit_can_frame(&PYLON_8220);
+  }
+
+  PYLON_8210.ID = 0x8210 + address;
+  PYLON_8210.data.u8[0] = want_closed ? 0xAA : 0x00;  // Charge command
+  PYLON_8210.data.u8[1] = 0x00;                       // Discharge command
+  transmit_can_frame(&PYLON_8210);
+  // 0x8240 (mask external comm loss) and 0x8260 (Run) are never sent: they would bypass BMS protections
+}
+
+/* Modes 1 and 2 only. The Solax driver reports dc_bus_live to the inverter as the contactor state
+   (SOLAX_1875 byte 4) and its bus_watch walks BUS_WAIT_LIVE -> BUS_LIVE -> BUS_DROPPED -> live again,
+   replaying the announce when the pack comes back. So dc_bus_live has to follow the real JBD relay:
+   false at once when opening is requested, true only after the close delay while the BMS is talking,
+   awake and not reporting RELAY_ERR. Left alone with GPIO contactor control, which owns the flag then,
+   and by a Pylon running as 2nd/3rd battery, as the flag belongs to the main battery. */
+bool PylonBattery::owns_dc_bus_live() {
+  return user_selected_pylon_relay_control != RELAY_MODE_OFF && !contactor_control_enabled &&
+         allows_contactor_closing != nullptr;
+}
+
+void PylonBattery::update_dc_bus_live(unsigned long currentMillis) {
+  if (!owns_dc_bus_live()) {
+    return;
+  }
+  const bool want_closed = extended_data.want_closed;
+  const bool bms_talking = bms_frame_seen && (currentMillis - last_bms_frame_ms) < BMS_SILENT_AFTER_MS;
+  const bool relay_error = (extended_data.fault & FAULT_RELAY_ERR) != 0;
+  const bool bms_asleep = extended_data.have_4250 && extended_data.basic_status == 0;
+  const bool delay_done = (currentMillis - want_closed_since_ms) >= user_selected_pylon_relay_close_delay_ms;
+
+  const bool live = want_closed && delay_done && bms_talking && !relay_error && !bms_asleep;
+  if (live != datalayer.system.status.dc_bus_live) {
+    logging.printf("[Pylon] DC bus %s (want_closed %d, talking %d, relay_err %d, asleep %d)\n", live ? "live" : "dead",
+                   want_closed, bms_talking, relay_error, bms_asleep);
+  }
+  datalayer.system.status.dc_bus_live = live;
+}
+
 void PylonBattery::transmit_can(unsigned long currentMillis) {
+  const bool relay_control = user_selected_pylon_relay_control != RELAY_MODE_OFF;
+  const bool want_closed =
+      datalayer.system.status.inverter_allows_contactor_closing && !datalayer.system.info.equipment_stop_active;
+
+  extended_data.relay_control_mode = user_selected_pylon_relay_control;
+  extended_data.address_is_auto = user_selected_pylon_bms_address == 0;
+  extended_data.command_address = user_selected_pylon_bms_address != 0      ? user_selected_pylon_bms_address
+                                  : extended_data.bms_address_detected != 0 ? extended_data.bms_address_detected
+                                                                            : 1;
+  extended_data.want_closed = want_closed;
+
+  if (want_closed != previous_want_closed || !relay_commands_sent) {
+    if (want_closed) {
+      want_closed_since_ms = currentMillis;
+    }
+    if (relay_control) {
+      logging.printf("[Pylon] Relay %s requested, BMS address %u\n", want_closed ? "close" : "open",
+                     extended_data.command_address);
+      send_relay_commands(want_closed);  // Right away, not only on the next 1 s tick
+      if (!want_closed && owns_dc_bus_live()) {
+        datalayer.system.status.dc_bus_live = false;
+      }
+    }
+    previous_want_closed = want_closed;
+    relay_commands_sent = true;
+  }
+
   // Send 1s CAN Message
   if (currentMillis - previousMillis1000 >= INTERVAL_1_S) {
     previousMillis1000 = currentMillis;
 
-    PYLON_8200.data.u8[0] = 0xAA;  //AA = Quit sleep, 55 = Goto sleep
-
-    PYLON_8210.data.u8[0] = 0xAA;  //TODO: how should we control this?
-    /*Charge Command: When the battery is in under-voltage protection, the contactors are open. When
-    we are about to charge the battery, send this command, then the battery will close contactors. 
-    If the battery is in sleep status, wake up first then use this command.*/
-
-    PYLON_8210.data.u8[1] = 0x00;  //TODO: how should we control this?
-    /*Discharge Command: When the battery is in over-voltage protection, the contactors are open. When
-    we are about to discharge the battery, send this command, then the battery will close contactors. 
-    If the battery is in sleep status, wake up first then use this command.*/
-
     transmit_can_frame(&PYLON_3010);  // Heartbeat
     transmit_can_frame(&PYLON_4200);  // Ensemble OR System equipment info, depends on frame0
-    transmit_can_frame(&PYLON_8200);  // Control device quit sleep status
-    transmit_can_frame(&PYLON_8210);  // Charge command
 
-    //transmit_can_frame(&PYLON_8240);  // Emergency Charge command
-    //TODO: Implement? This message can be used to force battery on for 5 minutes, ignoring ext comm errors
+    if (relay_control) {
+      send_relay_commands(want_closed);
+    } else {
+      // Relay control Off: the original messages, unaddressed, no 0x8220
+      PYLON_8200.data.u8[0] = 0xAA;  //AA = Quit sleep, 55 = Goto sleep
+
+      PYLON_8210.data.u8[0] = 0xAA;
+      /*Charge Command: When the battery is in under-voltage protection, the contactors are open. When
+      we are about to charge the battery, send this command, then the battery will close contactors.
+      If the battery is in sleep status, wake up first then use this command.*/
+
+      PYLON_8210.data.u8[1] = 0x00;
+      /*Discharge Command: When the battery is in over-voltage protection, the contactors are open. When
+      we are about to discharge the battery, send this command, then the battery will close contactors.
+      If the battery is in sleep status, wake up first then use this command.*/
+
+      transmit_can_frame(&PYLON_8200);  // Control device quit sleep status
+      transmit_can_frame(&PYLON_8210);  // Charge command
+    }
 
     mux = (mux + 1) % 3;  // mux cycles between 0-1-2-0-1...
     PYLON_4200.data.u8[0] = mux;
@@ -306,7 +495,12 @@ void PylonBattery::setup(void) {  // Performs one time setup at startup
   }
   datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
 
+  // The inverter decides when to close; the relay itself is driven over CAN in modes 1 and 2
   if (allows_contactor_closing) {
     *allows_contactor_closing = true;
+  }
+
+  if (owns_dc_bus_live()) {
+    datalayer.system.status.dc_bus_live = false;  // Until the BMS has been heard and the close delay is over
   }
 }

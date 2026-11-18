@@ -685,6 +685,9 @@ int user_selected_daly_power_at_0_degree_C = 800;
 bool user_selected_use_estimated_SOC = false;
 bool user_selected_use_estimated_charge_limits = false;
 uint16_t user_selected_pylon_baudrate = 500;
+uint8_t user_selected_pylon_bms_address = 0;
+uint8_t user_selected_pylon_relay_control = 0;
+uint16_t user_selected_pylon_relay_close_delay_ms = 3000;
 // Use 0V for user selected cell/pack voltage defaults (On boot will be replaced with saved values from NVM)
 uint16_t user_selected_max_pack_voltage_dV = 0;
 uint16_t user_selected_min_pack_voltage_dV = 0;

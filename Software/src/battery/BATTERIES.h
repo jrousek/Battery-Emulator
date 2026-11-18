@@ -61,6 +61,9 @@ extern uint16_t user_selected_tesla_GTW_mapRegion;
 extern uint16_t user_selected_tesla_GTW_chassisType;
 extern uint16_t user_selected_tesla_GTW_packEnergy;
 extern uint16_t user_selected_pylon_baudrate;
+extern uint8_t user_selected_pylon_bms_address;            // 0 = auto, 1-15 = fixed
+extern uint8_t user_selected_pylon_relay_control;          // 0 = Off, 1 = Force relay, 2 = Sleep/Wake
+extern uint16_t user_selected_pylon_relay_close_delay_ms;  // 0-30000
 
 /* User-selected DALY BMS settings */
 extern int user_selected_daly_power_per_percent;

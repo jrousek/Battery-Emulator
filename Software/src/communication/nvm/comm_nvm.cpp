@@ -131,6 +131,13 @@ void init_stored_settings() {
   user_selected_pylon_30koffset = settings.getBool("PYLONOFFSET", false);
   user_selected_pylon_invert_byteorder = settings.getBool("PYLONORDER", false);
   user_selected_pylon_baudrate = settings.getUInt("PYLONBAUD", 500);
+  // Out-of-range values fall back to the defaults, which keep the historic Pylon behaviour
+  const uint32_t pylon_addr = settings.getUInt("PYLONADDR", 0);
+  user_selected_pylon_bms_address = pylon_addr > 15 ? 0 : pylon_addr;
+  const uint32_t pylon_relay = settings.getUInt("PYLONRELAY", 0);
+  user_selected_pylon_relay_control = pylon_relay > 2 ? 0 : pylon_relay;
+  const uint32_t pylon_relay_ms = settings.getUInt("PYLONRLYMS", 3000);
+  user_selected_pylon_relay_close_delay_ms = pylon_relay_ms > 30000 ? 30000 : pylon_relay_ms;
   user_selected_inverter_cells = settings.getUInt("INVCELLS", 0);
   user_selected_inverter_modules = settings.getUInt("INVMODULES", 0);
   user_selected_inverter_cells_per_module = settings.getUInt("INVCELLSPER", 0);
