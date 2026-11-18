@@ -1,6 +1,8 @@
 #ifndef INDEX_HTML_H
 #define INDEX_HTML_H
 
+#include "solavolt_branding.h"
+
 // The icon itself is served from /favicon.svg (webserver.cpp) with a long
 // cache lifetime, so every page carries only this link tag. Small-flash
 // devices omit the icon entirely.
@@ -10,10 +12,11 @@
 #define INDEX_HTML_FAVICON_LINK ""
 #endif  // SMALL_FLASH_DEVICE
 
-#define INDEX_HTML_HEADER                                                                                                           \
-  R"rawliteral(<!doctype html><html><head><meta charset="utf-8"><title>Battery Emulator</title>)rawliteral" INDEX_HTML_FAVICON_LINK \
+#define INDEX_HTML_HEADER                                                                                                                    \
+  R"rawliteral(<!doctype html><html><head><meta charset="utf-8"><title>Battery Emulator SOLAVOLT</title>)rawliteral" INDEX_HTML_FAVICON_LINK \
   R"rawliteral(<meta content="width=device-width"name=viewport><style>html{font-family:Arial;display:inline-block;text-align:center}h2{font-size:3rem}body{max-width:800px;margin:0 auto}</style><body>)rawliteral"
-#define INDEX_HTML_FOOTER R"rawliteral(</body></html>)rawliteral";
+// Every page ends with the SOLAVOLT edition line, which links to the license and source code.
+#define INDEX_HTML_FOOTER SOLAVOLT_FOOTER_HTML R"rawliteral(</body></html>)rawliteral";
 
 // Help buttons (help.js). A page carries only this tag; the loader is cached by the browser and
 // the texts are fetched from web_data/help/help.json, so neither costs flash per page. A form
